@@ -158,10 +158,6 @@ Graph* read_file(char *filename) {
         g->edges++;
     }
 
-    printf("Vertices: %d\n", g->vertices);
-    printf("Edges: %d\n", g->edges);
-    printf("Period: %d\n", g->period);
-
     fclose(file);
     return g;
 }
@@ -195,21 +191,33 @@ void free_graph(Graph *graph) {
 
 
 int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("Usage: %s <graph_file>\n", argv[0]);
+        return 1;
+    }
 
+    Graph *graph = read_file(argv[1]);
+    if (!graph) {
+        printf("Failed to read graph from file: %s\n", argv[1]);
+        return 1;
+    }
 
-    Graph *graph = read_file("graph3.txt");
-    
-    print_graph(graph);
+    // print_graph(graph);
 
-    PathResult r = dijkstra(graph, 0, 3);
+    int from, to;
+    while (scanf("%d %d", &from, &to) == 2) {
+        PathResult r = dijkstra(graph, from, to);
 
-    printf("Best cost: %d\n", r.cost);
-    printf("Path: ");
-    for (int i = 0; i < r.length; i++)
-        printf("%d ", r.path[i]);
-    printf("\n");
-
-    free(r.path);
+        if (r.path == NULL || r.length == 0) {
+            printf("No path found from %d to %d\n", from, to);
+        } else {
+            for (int i = 0; i < r.length-1; i++)
+                printf("%d ", r.path[i]);
+            printf("%d", r.path[r.length-1]);
+            printf("\n");
+            free(r.path);
+        }
+    }
 
 
     free_graph(graph);
