@@ -4,222 +4,222 @@
 #include <limits.h>
 
 typedef struct Edge {
-    int from;
     int to;
-    int *weights;
+    int *weights;          // array of length 'period'
     struct Edge *next;
 } Edge;
 
 typedef struct {
     int vertices;
-    int edges;
     int period;
-    Edge *head;
-    Edge *tail;
+    Edge **adj;            // adjacency list
 } Graph;
 
-Edge* get_edges_from(Graph *g, int v) {
-    Edge *e = g->head;
-    while (e != NULL) {
-        if (e->from == v) return e;
-        e = e->next;
-    }
-    return NULL;
-}
-
-typedef struct NodeState {
-    int v;          // current vertex
-    int cost;       // total cost so far
-    int time;       // time (hops)
+typedef struct {
+    int v;      // vertex
+    int cost;   // total cost
+    int time;   // time step
 } NodeState;
 
-typedef struct PQ {
+typedef struct {
     NodeState *arr;
     int size;
-} PQ;
+    int capacity;
+} MinHeap;
 
-typedef struct PathResult {
+MinHeap* create_heap(int capacity) {
+    MinHeap *h = malloc(sizeof(MinHeap));
+    h->arr = malloc(capacity * sizeof(NodeState));
+    h->size = 0;
+    h->capacity = capacity;
+    return h;
+}
+
+void swap(NodeState *a, NodeState *b) {
+    NodeState tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+void heap_push(MinHeap *h, NodeState ns) {
+    if (h->size >= h->capacity) {
+        h->capacity *= 2;
+        h->arr = realloc(h->arr, h->capacity * sizeof(NodeState));
+    }
+    int i = h->size++;
+    h->arr[i] = ns;
+    while (i > 0) {
+        int parent = (i-1)/2;
+        if (h->arr[parent].cost <= h->arr[i].cost) break;
+        swap(&h->arr[parent], &h->arr[i]);
+        i = parent;
+    }
+}
+
+NodeState heap_pop(MinHeap *h) {
+    NodeState top = h->arr[0];
+    h->arr[0] = h->arr[--h->size];
+    int i = 0;
+    while (1) {
+        int left = 2*i + 1;
+        int right = 2*i + 2;
+        int smallest = i;
+        if (left < h->size && h->arr[left].cost < h->arr[smallest].cost) smallest = left;
+        if (right < h->size && h->arr[right].cost < h->arr[smallest].cost) smallest = right;
+        if (smallest == i) break;
+        swap(&h->arr[i], &h->arr[smallest]);
+        i = smallest;
+    }
+    return top;
+}
+
+void free_heap(MinHeap *h) {
+    free(h->arr);
+    free(h);
+}
+
+typedef struct {
     int cost;
-    int hops;
     int *path;
     int length;
 } PathResult;
 
-void pq_push(PQ *pq, NodeState ns) {
-    pq->arr[pq->size++] = ns;
-    for (int i = pq->size - 1; i > 0; i--) {
-        if (pq->arr[i].cost < pq->arr[i-1].cost) {
-            NodeState t = pq->arr[i];
-            pq->arr[i] = pq->arr[i-1];
-            pq->arr[i-1] = t;
-        }
-    }
-}
-
-NodeState pq_pop(PQ *pq) {
-    return pq->arr[--pq->size];
-}
-
-PathResult dijkstra(Graph *g, int start, int end) {
-
-    int best[g->vertices][g->period];
-    int prev[g->vertices][g->period];
-    bool done[g->vertices][g->period];
-
-    for(int i=0;i<g->vertices;i++)
-        for(int t=0;t<g->period;t++)
-            best[i][t]=INT_MAX, prev[i][t]=-1, done[i][t]=false;
-
-    PQ pq = { malloc(100000*sizeof(NodeState)), 0 };
-
-    best[start][0]=0;
-    pq_push(&pq,(NodeState){start,0,0});
-
-    while(pq.size>0){
-
-        NodeState cur=pq_pop(&pq);
-        int u=cur.v, t=cur.time % g->period;
-
-        if(done[u][t])continue;
-        done[u][t]=true;
-
-        Edge *e=g->head;
-        while(e){
-            if(e->from==u){
-                int nt=(t+1)%g->period;
-                int w=e->weights[t];
-                int nc=cur.cost+w;
-
-                if(nc < best[e->to][nt]){
-                    best[e->to][nt]=nc;
-                    prev[e->to][nt]=u;
-                    pq_push(&pq,(NodeState){e->to,nc,cur.time+1});
-                }
-            }
-            e=e->next;
-        }
-    }
-
-    // find best arrival state for END
-    int best_t=0;
-    for(int t=1;t<g->period;t++)
-        if(best[end][t]<best[end][best_t]) best_t=t;
-
-    // reconstruct path
-    int *path=malloc(g->vertices*sizeof(int));
-    int len=0, cur=end, t=best_t;
-    while(cur!=-1){
-        path[len++]=cur;
-        int p=prev[cur][t];
-        t=(t-1+g->period)%g->period;
-        cur=p;
-    }
-    for(int i=0;i<len/2;i++){int x=path[i];path[i]=path[len-1-i];path[len-1-i]=x;}
-
-    return (PathResult){ best[end][best_t], -1/*unused*/, path, len };
-}
-
-
-Graph* read_file(char *filename) {
-    FILE *file = fopen(filename, "r");
-    if (!file) return NULL;
+Graph* read_file(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) return NULL;
 
     int vertices, period;
-    fscanf(file, "%d %d", &vertices, &period);
+    if (fscanf(f, "%d %d", &vertices, &period) != 2) { fclose(f); return NULL; }
 
     Graph *g = malloc(sizeof(Graph));
     g->vertices = vertices;
     g->period = period;
-    g->edges = 0;
-    g->head = NULL;
-    g->tail = NULL;
+    g->adj = calloc(vertices, sizeof(Edge*));
 
-    while (true) {
+    while (1) {
         int from, to;
-        if (fscanf(file, "%d %d", &from, &to) != 2)
-            break;
+        if (fscanf(f, "%d %d", &from, &to) != 2) break;
 
         Edge *e = malloc(sizeof(Edge));
-        e->from = from;
+        e->weights = malloc(period * sizeof(int));
+        for (int i = 0; i < period; i++) fscanf(f, "%d", &e->weights[i]);
         e->to = to;
 
-        e->weights = malloc(period * sizeof(int));
-        for (int i = 0; i < period; i++) fscanf(file, "%d", &e->weights[i]);
-
-        
-        e->next = NULL;
-        if (g->head == NULL) {
-            g->head = e;
-            g->tail = e;
-        } else {
-            g->tail->next = e;
-            g->tail = e;
-        }
-        g->edges++;
+        e->next = g->adj[from];
+        g->adj[from] = e;
     }
 
-    fclose(file);
+    fclose(f);
     return g;
 }
 
-void print_graph(Graph *graph) {
-    Edge *edge = graph->head;
-    if (edge == NULL) {
-        return;
-    }
-    while (edge != NULL) {
-        printf("%d->%d  w: ", edge->from, edge->to);
-        for (int i = 0; i < graph->period-1; i++) {
-            printf("%d,", edge->weights[i]);
+void free_graph(Graph *g) {
+    for (int i = 0; i < g->vertices; i++) {
+        Edge *e = g->adj[i];
+        while (e) {
+            Edge *next = e->next;
+            free(e->weights);
+            free(e);
+            e = next;
         }
-        printf("%d", edge->weights[graph->period-1]);
-        printf("\n");
-        edge = edge->next;
     }
+    free(g->adj);
+    free(g);
 }
 
-void free_graph(Graph *graph) {
-    Edge *edge = graph->head;
-    while (edge != NULL) {
-        Edge *next = edge->next;
-        free(edge->weights);
-        free(edge);
-        edge = next;
-    }
-    free(graph);
-}
+PathResult dijkstra(Graph *g, int start, int end) {
+    int vertices = g->vertices;
+    int period = g->period;
 
+    int **best = malloc(vertices * sizeof(int*));
+    int **prev = malloc(vertices * sizeof(int*));
+    bool **done = malloc(vertices * sizeof(bool*));
+
+    for (int i = 0; i < vertices; i++) {
+        best[i] = malloc(period * sizeof(int));
+        prev[i] = malloc(period * sizeof(int));
+        done[i] = malloc(period * sizeof(bool));
+        for (int t = 0; t < period; t++) {
+            best[i][t] = INT_MAX;
+            prev[i][t] = -1;
+            done[i][t] = false;
+        }
+    }
+
+    MinHeap *pq = create_heap(1000);
+    best[start][0] = 0;
+    heap_push(pq, (NodeState){start,0,0});
+
+    while (pq->size > 0) {
+        NodeState cur = heap_pop(pq);
+        int u = cur.v;
+        int t = cur.time % period;
+        if (done[u][t]) continue;
+        done[u][t] = true;
+
+        for (Edge *e = g->adj[u]; e; e = e->next) {
+            int nt = (t + 1) % period;
+            int nc = cur.cost + e->weights[t];
+            if (nc < best[e->to][nt]) {
+                best[e->to][nt] = nc;
+                prev[e->to][nt] = u;
+                heap_push(pq, (NodeState){e->to, nc, cur.time+1});
+            }
+        }
+    }
+
+    // Find best arrival time
+    int best_t = 0;
+    for (int t = 1; t < period; t++)
+        if (best[end][t] < best[end][best_t]) best_t = t;
+
+    // Reconstruct path
+    int *path = malloc(vertices * sizeof(int));
+    int len = 0;
+    int cur = end, t = best_t;
+    while (cur != -1) {
+        path[len++] = cur;
+        int p = prev[cur][t];
+        t = (t - 1 + period) % period;
+        cur = p;
+    }
+    for (int i = 0; i < len/2; i++) {
+        int tmp = path[i];
+        path[i] = path[len-1-i];
+        path[len-1-i] = tmp;
+    }
+
+    int final_cost = best[end][best_t];  // save the value first
+
+    // cleanup
+    for (int i = 0; i < vertices; i++) {
+        free(best[i]);
+        free(prev[i]);
+        free(done[i]);
+    }
+    free(best);
+    free(prev);
+    free(done);
+
+    free_heap(pq);
+
+    return (PathResult){final_cost, path, len};
+
+}
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s <graph_file>\n", argv[0]);
-        return 1;
-    }
-
-    Graph *graph = read_file(argv[1]);
-    if (!graph) {
-        printf("Failed to read graph from file: %s\n", argv[1]);
-        return 1;
-    }
-
-    // print_graph(graph);
+    Graph *g = read_file(argv[1]);
+    if (!g) return 1;
 
     int from, to;
     while (scanf("%d %d", &from, &to) == 2) {
-        PathResult r = dijkstra(graph, from, to);
 
-        if (r.path == NULL || r.length == 0) {
-            printf("No path found from %d to %d\n", from, to);
-        } else {
-            for (int i = 0; i < r.length-1; i++)
-                printf("%d ", r.path[i]);
-            printf("%d", r.path[r.length-1]);
-            printf("\n");
-            free(r.path);
-        }
+        PathResult r = dijkstra(g, from, to);
+            for (int i = 0; i < r.length - 1; i++) printf("%d ", r.path[i]);
+            printf("%d\n", r.path[r.length - 1]);
+        free(r.path);
     }
 
-
-    free_graph(graph);
+    free_graph(g);
     return 0;
 }
